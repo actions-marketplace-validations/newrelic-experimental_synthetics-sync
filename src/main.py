@@ -10,35 +10,63 @@ GRAPHQL_KEY =  os.getenv('NEW_RELIC_API_KEY')
 WORKSPACE = os.getenv('GITHUB_WORKSPACE')
 
 def main():
-    fileNames = readAndParseFile()
+    changedFiles = readAndParseFile("changed_monitors.json")
+    deletedFiles = readAndParseFile("deleted_monitors.json")
     inputs = getInputs()
 
-    for monitor in fileNames:
-        m = getMonitor(monitor['name']) # Find monitor in NR based on filename
-        if (m != 'none'):
-            updateMonitor(m, monitor['script']) # Update if it exists
-        else:
-            if any(input == "" for input in inputs.values()):
-                print("Missing inputs to create new monitor for file: " + monitor['name'] +  ". Please review inputs on last step if you wish to create new monitors. Skipping creation of newly committed files.")
+    # Handle new/updated files
+    if len(changedFiles) > 0:
+        for monitor in changedFiles:
+            m = getMonitor(monitor['name']) # Find monitor in NR based on filename
+            if (m != 'none'):
+                updateMonitor(m, monitor['script']) # Update if it exists
             else:
-                if ('SCRIPT_API' in monitor['script']):
-                    monitor['monitorType'] = 'SCRIPT_API'
-                elif ('SCRIPT_BROWSER' in monitor['script']):
-                    monitor['monitorType'] = 'SCRIPT_BROWSER'
+                if any(input == "" for input in inputs.values()):
+                    print("Missing inputs to create new monitor for file: " + monitor['name'] +  ". Please review inputs on last step if you wish to create new monitors. Skipping creation of newly committed files.")
                 else:
-                    monitor['monitorType'] = 'undefined'
+                    if ('SCRIPT_API' in monitor['script']):
+                        monitor['monitorType'] = 'SCRIPT_API'
+                    elif ('SCRIPT_BROWSER' in monitor['script']):
+                        monitor['monitorType'] = 'SCRIPT_BROWSER'
+                    else:
+                        monitor['monitorType'] = 'undefined'
 
-                if monitor['monitorType'] != 'undefined':
-                    createMonitor(monitor, inputs) #Create new if it doesnt AND inputs are correctly filled out
-                else:
-                    print("`monitorType` not defined in script: " + monitor['name'] + ". Monitor will not be created. Please add monitorType as a comment within your new script and recommit.")
+                    if monitor['monitorType'] != 'undefined':
+                        createMonitor(monitor, inputs) # Create new if it doesnt exist AND inputs are valid
+                    else:
+                        print("`monitorType` not defined in script: " + monitor['name'] + ". Monitor will not be created. Please add monitorType as a comment within your new script and recommit.")
+    else:
+        print('No modified or new monitors found in push')
+
+    # Handle deleted files
+    if len(deletedFiles) > 0:
+        for monitor in deletedFiles:
+            m = getMonitor(monitor['name']) # Find monitor in NR based on filename
+            if (m != 'none'):
+                deleteMonitor(m) # Delete monitor
+            else:
+                print('Monitor not found. Please validate that monitor was not deleted outside of this action.')
+    else:
+        print('No deleted scripts found in push')
 
 
-def readAndParseFile():
+def readAndParseFile(fileName):
     monitorList = None
     formatted = []
-    with open("monitors.json", "r") as f:
-        monitorList = json.load(f)
+
+    try:
+        with open(fileName, "r") as f:
+            monitorList = json.load(f)
+    except FileNotFoundError:
+        print(f"File '{fileName}' not found, continuing.")
+        return formatted
+    except json.JSONDecodeError:
+        print(f"Could not parse JSON from '{fileName}'")
+        return formatted
+    
+    if not monitorList:
+        print(f"No monitors read from file {fileName}. Exiting")
+        sys.exit(1)
 
     pattern = r"[^/]*(?=\.[^/]*$)" #remove file path and .js extension
     if (len(monitorList) > 0):
@@ -56,15 +84,14 @@ def readAndParseFile():
     return formatted
 
 def getInputs():
-    #Inputs for creation of new monitor upon new script commit [optional]
+    # Inputs for creation of new monitor upon new script commit [optional]
     acctId = core.get_input('accountId', required=False)
-    runtime = core.get_input('runtime', required=False) #new or old
     privateLocString = core.get_input('privateLocations', required=False)
     publicLocString = core.get_input('publicLocations', required=False)
     interval = core.get_input('interval', required=False)
     status = core.get_input('status', required=False)
 
-    #Convert strings to arrays if inputs are not empty
+    # Convert strings to arrays if inputs are not empty
     if privateLocString != "":
         privateLocations = eval(privateLocString)
     else:
@@ -77,17 +104,14 @@ def getInputs():
 
     if (type(publicLocations) is str and type(privateLocations) is str): # Both pub/private locations are default empty string
         locations = ""
-    elif (type(publicLocations) is str and type(privateLocations) is not str): #Only private locations configured
+    elif (type(publicLocations) is str and type(privateLocations) is not str): # Only private locations configured
         locations = {'private': privateLocations}
-    elif (type(publicLocations) is not str and type(privateLocations) is str): #Only public locations configured
+    elif (type(publicLocations) is not str and type(privateLocations) is str): # Only public locations configured
         locations = {'public': publicLocations}
     else: # both public and private configured
         locations = {'private': privateLocations, 'public': publicLocations}
 
-    if runtime == "old":
-        runtime = None
-
-    createInputs = {'account': acctId, 'runtime': runtime, 'locations': locations, 'interval': interval, 'status': status}
+    createInputs = {'account': acctId, 'locations': locations, 'interval': interval, 'status': status}
 
     return createInputs
 
@@ -181,85 +205,73 @@ def updateMonitor(monitor, script):
         else:
             print('Type for monitor:' + monitor['name'] + 'is ' + monitor['monitorType'] + ". Scripted API or Browser are only accepted types. Skipping update...")
 
+
 def createMonitor(monitor, inputs):
         type = None
 
         if (monitor['monitorType'] == 'SCRIPT_BROWSER'):
             type = 'syntheticsCreateScriptBrowserMonitor'
-            if (inputs['runtime'] == 'new'):
-                inputs['runtime'] = {'runtimeType': "CHROME_BROWSER", 'runtimeTypeVersion': "100"}
         elif (monitor['monitorType'] == 'SCRIPT_API'):
             type = 'syntheticsCreateScriptApiMonitor'
-            if (inputs['runtime'] == 'new'):
-                inputs['runtime'] = {'runtimeType': "NODE_API", 'runtimeTypeVersion': "16.10"}
 
         if (type != None): # Monitor Type required
-            if (inputs['runtime'] != None): #create monitor against new (latest) runtime
-                vars = {"account": int(inputs['account']), "runtime": inputs['runtime'], "locations": inputs['locations'], "name": monitor['name'], "interval": inputs['interval'], "script": monitor['script'], "status": inputs['status']}
-                gql = f"""
-                    mutation($account: Int!, $runtime: SyntheticsRuntimeInput, $locations: SyntheticsScriptedMonitorLocationsInput!, $name: String!, $interval: SyntheticsMonitorPeriod!, $script: String!, $status: SyntheticsMonitorStatus! ) {{
-                      {type}(accountId: $account, monitor: {{locations: $locations, name: $name, period: $interval, runtime: $runtime, script: $script, status: $status}}) {{
-                        errors {{
-                          description
-                          type
-                        }}
-                        monitor {{
-                          guid
-                          name
-                          status
-                        }}
-                      }}
+            vars = {"account": int(inputs['account']), "locations": inputs['locations'], "name": monitor['name'], "interval": inputs['interval'], "script": monitor['script'], "status": inputs['status']}
+            gql = f"""
+                mutation($account: Int!, $locations: SyntheticsScriptedMonitorLocationsInput!, $name: String!, $interval: SyntheticsMonitorPeriod!, $script: String!, $status: SyntheticsMonitorStatus! ) {{
+                    {type}(accountId: $account, monitor: {{locations: $locations, name: $name, period: $interval, script: $script, status: $status}}) {{
+                    errors {{
+                        description
+                        type
                     }}
-                """
-                h = {'Content-Type': 'application/json', 'API-Key': GRAPHQL_KEY}
-                try:
-                    r = requests.post(GRAPHQL_API, headers=h, json={'query': gql, 'variables': vars})
-                    resp = r.json()
-                    if ('errors' in resp):
-                        print("Error creating monitor: " + monitor['name'] + '. Skipping...')
-                        print(resp['errors'])
-                    elif (len(resp['data'][type]['errors']) > 0):
-                        print("Error creating monitor: " + monitor['name'] + '. Skipping...')
-                        print(resp['data'][type]['errors'])
-                    else:
-                        print("Successfully created new monitor: " + resp['data'][type]['monitor']['name'] + ". Monitor is currently " + resp['data'][type]['monitor']['status'])
-                except requests.exceptions.RequestException as e:
-                    print("Error creating monitor: " + monitor['name'] + '. Skipping...')
-                    print(e)
-            else: #create monitor against legacy runtime
-                vars = {"account": int(inputs['account']), "locations": inputs['locations'], "name": monitor['name'], "interval": inputs['interval'], "script": monitor['script'], "status": inputs['status']}
-                gql = f"""
-                    mutation($account: Int!, $locations: SyntheticsScriptedMonitorLocationsInput!, $name: String!, $interval: SyntheticsMonitorPeriod!, $script: String!, $status: SyntheticsMonitorStatus! ) {{
-                      {type}(accountId: $account, monitor: {{locations: $locations, name: $name, period: $interval, script: $script, status: $status}}) {{
-                        errors {{
-                          description
-                          type
-                        }}
-                        monitor {{
-                          guid
-                          name
-                          status
-                        }}
-                      }}
+                    monitor {{
+                        guid
+                        name
+                        status
                     }}
-                """
-                h = {'Content-Type': 'application/json', 'API-Key': GRAPHQL_KEY}
-                try:
-                    r = requests.post(GRAPHQL_API, headers=h, json={'query': gql, 'variables': vars})
-                    resp = r.json()
-                    if ('errors' in resp):
-                        print("Error creating monitor: " + monitor['name'] + '. Skipping...')
-                        print(resp['errors'])
-                    elif (len(resp['data'][type]['errors']) > 0):
-                        print("Error creating monitor: " + monitor['name'] + '. Skipping...')
-                        print(resp['data'][type]['errors'])
-                    else:
-                        print("Successfully created new monitor: " + resp['data'][type]['monitor']['name'] + ". Monitor is currently " + resp['data'][type]['monitor']['status'])
-                except requests.exceptions.RequestException as e:
+                    }}
+                }}
+            """
+            h = {'Content-Type': 'application/json', 'API-Key': GRAPHQL_KEY}
+            try:
+                r = requests.post(GRAPHQL_API, headers=h, json={'query': gql, 'variables': vars})
+                resp = r.json()
+                if ('errors' in resp):
                     print("Error creating monitor: " + monitor['name'] + '. Skipping...')
-                    print(e)
+                    print(resp['errors'])
+                elif (len(resp['data'][type]['errors']) > 0):
+                    print("Error creating monitor: " + monitor['name'] + '. Skipping...')
+                    print(resp['data'][type]['errors'])
+                else:
+                    print("Successfully created new monitor: " + resp['data'][type]['monitor']['name'] + ". Monitor is currently " + resp['data'][type]['monitor']['status'])
+            except requests.exceptions.RequestException as e:
+                print("Error creating monitor: " + monitor['name'] + '. Skipping...')
+                print(e)
         else:
             print('Type for monitor:' + monitor['name'] + 'is ' + monitor['monitorType'] + ". Scripted API or Browser are only accepted types. Skipping create...")
+
+
+def deleteMonitor(monitor):
+    vars = {"guid": monitor['guid']}
+    gql = """
+    mutation($guid: EntityGuid!) {
+        syntheticsDeleteMonitor(guid: $guid) {
+            deletedGuid
+        }
+    }
+    """
+    h = {'Content-Type': 'application/json', 'API-Key': GRAPHQL_KEY}
+    try:
+        r = requests.post(GRAPHQL_API, headers=h, json={'query': gql, 'variables': vars})
+        resp = r.json()
+        print(resp)
+        if ('errors' in resp):
+            print("Error deleting monitor: " + monitor['name'] + '. Skipping...')
+            print(resp['errors'])
+        else:
+            print("Successfully deleted monitor: " + monitor['name'] + " with guid: " + resp['data']['syntheticsDeleteMonitor']['deletedGuid'] + ".")
+    except requests.exceptions.RequestException as e:
+        print("Error deleting monitor: " + monitor['name'] + '. Skipping...')
+        print(e)
 
 if __name__ == '__main__':
     main()
