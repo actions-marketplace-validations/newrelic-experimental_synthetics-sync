@@ -50,7 +50,7 @@ jobs:
       # Detects changes to .js files only in any sub path, formats those filenames/paths as json
       - name: Get Changed Scripts
         id: changed-files
-        uses: tj-actions/changed-files@v35
+        uses: tj-actions/changed-files@ed68ef82c095e0d48ec87eccea555d944a631a4c
         with:
           separator: ","
           files: |    # Modify this to wherever your specific scripts reside - defaults to any js files
@@ -104,7 +104,7 @@ Below are a couple different configurations for various use cases:
 ...
   - name: Sync Changes to Synthetics
     if: steps.changed-files.outputs.any_changed == 'true'
-    uses: newrelic-experimental/synthetics-sync@v1.2
+    uses: newrelic-experimental/synthetics-sync@v1.3
     with:
       accountId: ""
       privateLocations: ""
@@ -122,7 +122,7 @@ Below are a couple different configurations for various use cases:
 ...
   - name: Sync Changes to Synthetics
     if: steps.changed-files.outputs.any_changed == 'true'
-    uses: newrelic-experimental/synthetics-sync@v1.2
+    uses: newrelic-experimental/synthetics-sync@v1.3
     with: # all optional defaults for creation of new scripts committed
       accountId: 123
       privateLocations: "[{'guid': 'xtz'},{'guid': 'abc'}]"
