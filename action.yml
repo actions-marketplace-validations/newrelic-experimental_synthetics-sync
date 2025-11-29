@@ -11,10 +11,6 @@ inputs:
     description: "New Relic account id in which new monitor will be created within."
     required: false
     default: ""
-  runtime:
-    description: "Synthetics runtime the monitor will use."
-    required: false
-    default: ""
   privateLocations:
     description: "Private location guids that the new monitor will execute on."
     required: false
@@ -39,7 +35,6 @@ runs:
   image: "Dockerfile"
   args:
     - ${{ inputs.accountId }}
-    - ${{ inputs.runtime }}
     - ${{ inputs.privateLocations }}
     - ${{ inputs.publicLocations }}
     - ${{ inputs.interval }}

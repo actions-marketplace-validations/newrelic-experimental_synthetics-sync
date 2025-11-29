@@ -15,25 +15,30 @@ jobs:
 
       - name: Get Changed Scripts
         id: changed-files
-        uses: tj-actions/changed-files@v35
+        uses: tj-actions/changed-files@@ed68ef82c095e0d48ec87eccea555d944a631a4c
         with:
           separator: ","
           files: |
             **/*.js
-          json: "true"
+          json: true
 
       - name: Store Changed Scripts
         if: steps.changed-files.outputs.any_changed == 'true'
         run: |
-          echo ${{ steps.changed-files.outputs.all_changed_files }} > monitors.json
-          cat monitors.json
+          echo ${{ steps.changed-files.outputs.all_changed_files }} > changed_monitors.json
+          cat changed_monitors.json
+
+      - name: Store Deleted Scripts
+        if: steps.changed-files.outputs.any_deleted == 'true'
+        run: |
+          echo ${{ steps.changed-files.outputs.deleted_files }} > deleted_monitors.json
+          cat deleted_monitors.json
 
       - name: Sync Changes to Synthetics
-        if: steps.changed-files.outputs.any_changed == 'true'
-        uses: newrelic-experimental/synthetics-sync@v1.2
+        if: steps.changed-files.outputs.any_modified == 'true'
+        uses: newrelic-experimental/synthetics-sync@v1.3
         with: # all optional defaults for creation of new scripts committed
           accountId: 1
-          runtime: "new"
           privateLocations: "[{'guid': 'abc'}]"
           publicLocations: "['AWS_AP_EAST_1', 'AWS_US_EAST_2']"
           interval: EVERY_15_MINUTES

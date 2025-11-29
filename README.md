@@ -1,16 +1,19 @@
+[![New Relic Experimental header](https://github.com/newrelic/opensource-website/raw/master/src/images/categories/Experimental.png)](https://opensource.newrelic.com/oss-category/#new-relic-experimental)
+
 # Synthetics Sync
 Github action that will sync synthetic script commits to corresponding Synthetic monitors within New Relic.
 
 Currently supports the following for Scripted Browser or Scripted API type monitors:
  - Syncing script changes to existing monitors.
  - Creating new monitors for new scripts committed.
+ - Deleting monitors when associated scripts are deleted.
 
 ## Requirements
 1. Configure your [New Relic User key](https://docs.newrelic.com/docs/apis/intro-apis/new-relic-api-keys/#user-key) as a repository secret.
 2. Create and configure your Workflow yaml ([see examples here](#examples)) under `.github/workflows`.
 
 **IMPORTANT**
-* This action also uses [tj-actions/changed-files](https://github.com/tj-actions/changed-files) to detect changes to any js files committed.
+* This action depends on the use of [tj-actions/changed-files](https://github.com/tj-actions/changed-files) to detect changes to any js files committed or removed.
 * Filenames of scripts committed should be 1-1 exact with the corresponding `monitorName` within New Relic.
 * If you plan on creating **new monitors** from newly committed scripts, each script must have one of the following comments somewhere within, to denote the monitor type (scripted browser or scripted api):
 
@@ -47,27 +50,32 @@ jobs:
       # Detects changes to .js files only in any sub path, formats those filenames/paths as json
       - name: Get Changed Scripts
         id: changed-files
-        uses: tj-actions/changed-files@v35
+        uses: tj-actions/changed-files@ed68ef82c095e0d48ec87eccea555d944a631a4c
         with:
           separator: ","
           files: |    # Modify this to wherever your specific scripts reside - defaults to any js files
             **/*.js
           json: "true"
 
-      # Proceed with storing filenames/paths in a local file for further processing, ONLY if any .js files have changed or been committed.
+      # Proceed with storing filenames/paths in a local file for further processing, ONLY if any .js files have been modified
       - name: Store Changed Scripts
         if: steps.changed-files.outputs.any_changed == 'true'
         run: |
-          echo ${{ steps.changed-files.outputs.all_changed_files }} > monitors.json
+          echo ${{ steps.changed-files.outputs.all_changed_files }} > changed_monitors.json
           cat monitors.json
+
+      - name: Store Deleted Scripts
+        if: steps.changed-files.outputs.any_deleted == 'true'
+        run: |
+          echo ${{ steps.changed-files.outputs.deleted_files }} > deleted_monitors.json
+          cat deleted_monitors.json
 
       # Parse out js filenames, which should match the entity names within NR, fetch the entity's guid, and update existing monitor or create new one
       - name: Sync Changes to Synthetics
         if: steps.changed-files.outputs.any_changed == 'true'
-        uses: newrelic-experimental/synthetics-sync@v1.2
+        uses: newrelic-experimental/synthetics-sync@v1.3
         with: # OPTIONAL defaults for creation of new scripts committed
           accountId: ""
-          runtime: ""
           privateLocations: ""
           publicLocations: ""
           interval: ""
@@ -75,12 +83,11 @@ jobs:
 ```
 
 ## Inputs
-The following are optional inputs if you wish to automatically **create** new monitors from newly committed scripts. If these are not included in the workflow, only changes to existing scripts will be sync'd with New Relic.
+The following are optional inputs if you wish to automatically **create** new monitors from newly committed scripts. If these are not included in the workflow, only changes to existing scripts will be synced with New Relic.
 
 | INPUT            | TYPE   | REQUIRED | DEFAULT | DESCRIPTION                                                                                                                                                                                                                                                                                |
 | ---------------- | ------ | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| accountId        | string | FALSE    | ""      | New Relic account id in which new monitor will be created within                                                                                                                                                                                                                           |
-| runtime          | string | FALSE    | ""      | Synthetics runtime the monitor will use. Options are `new` (Chrome 100/Node 16.10) or `old` (Chrome 72/Node 10)                                                                                                                                                                                                                    |
+| accountId        | string | FALSE    | ""      | New Relic account id in which new monitor will be created within                                                                                                                                                                                      
 | privateLocations | string | FALSE    | ""      | Array of private location guids that the new monitor will execute on. guids can be found within New Relic under Synthetic Monitoring -> Private Locations                                                                                                                                  |
 | publicLocations  | string | FALSE    | ""      | Array of public location names that the new monitor will execute on. The AWS region must be used, not the display name. A list of location inputs can be found [here](https://docs.newrelic.com/docs/synthetics/synthetic-monitoring/administration/synthetic-public-minion-ips/#location) |
 | interval         | string | FALSE    | ""      | The execution frequency of monitor created. Available options can be found [here](https://docs.newrelic.com/docs/apis/nerdgraph/examples/nerdgraph-synthetics-tutorial/#period-attribute)                                                                                                  |
@@ -97,10 +104,9 @@ Below are a couple different configurations for various use cases:
 ...
   - name: Sync Changes to Synthetics
     if: steps.changed-files.outputs.any_changed == 'true'
-    uses: newrelic-experimental/synthetics-sync@v1.2
+    uses: newrelic-experimental/synthetics-sync@v1.3
     with:
       accountId: ""
-      runtime: ""
       privateLocations: ""
       publicLocations: ""
       interval: ""
@@ -116,10 +122,9 @@ Below are a couple different configurations for various use cases:
 ...
   - name: Sync Changes to Synthetics
     if: steps.changed-files.outputs.any_changed == 'true'
-    uses: newrelic-experimental/synthetics-sync@v1.2
+    uses: newrelic-experimental/synthetics-sync@v1.3
     with: # all optional defaults for creation of new scripts committed
       accountId: 123
-      runtime: "new"
       privateLocations: "[{'guid': 'xtz'},{'guid': 'abc'}]"
       publicLocations: "['AWS_AP_EAST_1', 'AWS_US_EAST_2']"
       interval: EVERY_30_MINUTES
@@ -133,6 +138,8 @@ See [inputs](#inputs) for more information.
 * [Managing Synthetic Monitors w/ GraphQL](https://docs.newrelic.com/docs/apis/nerdgraph/examples/nerdgraph-synthetics-tutorial/)
 * [Public Locations](https://docs.newrelic.com/docs/synthetics/synthetic-monitoring/administration/synthetic-public-minion-ips/#location)
 * [Intro to Writing Scripts](https://docs.newrelic.com/docs/synthetics/synthetic-monitoring/scripting-monitors/introduction-scripted-browser-monitors/)
+
+Check out example [repo here](https://github.com/khpeet/local-newrelic-synthetics-example/actions) that uses this action.
 
 ## Contributing
 
